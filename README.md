@@ -8,4 +8,4 @@ You can select preset schedules to receive those notifications on a regular basi
 You can also have your devices checked and polled at regular intervals
 If you use chrome speakers integration, this app will attempt to initialize them each time it needs to use them as to compensate for their current unreliability (frequent loss of connection) from hubitat's hub. 
 
-Do not hesitate to report bugs, it always help me, however stupid it may seem. 
+Do not hesitate to report bugs, it always helps, however stupid it may seem. 
