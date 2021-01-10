@@ -448,7 +448,7 @@ ${listOfDevices[i]}
 """
             atomicState.devicesStringWithValueH += """${listOfDevices[i]}: ${atomicState.arrayH."${listOfDevices[i]}"}
 """
-            if($atomicState.arrayH."${listOfDevices[i]}" == "unresponsive")
+            if(atomicState.arrayH."${listOfDevices[i]}" == "unresponsive")
             {
                 atomicState.message += "${listOfDevices[i]} is unresponsive... "
             }
