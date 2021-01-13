@@ -1,5 +1,5 @@
 /*
-*  Copyright 2020 elfege
+*  Copyright 2016 elfege
 *
 *    Software distributed under the License is distributed on an "AS IS" BASIS, 
 *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
@@ -406,9 +406,13 @@ ${listOfDevices[i]}
 """
             logging "atomicState.devicesString: ${atomicState.devicesString}"
 
-            if(atomicState.array."${listOfDevices[i]}".toInteger() < 30)
+            if(atomicState.array."${listOfDevices[i]}" == "NO VALUE!")
             {
-                log.warn "${listOfDevices[i]}"
+               atomicState.message += "${listOfDevices[i]}'s is not working properly"
+            }
+            else if(atomicState.array."${listOfDevices[i]}".toInteger() < 30)
+            {
+                logging "${listOfDevices[i]}"
                 atomicState.message += "${listOfDevices[i]}'s battery is low... "
             }
         }
@@ -448,7 +452,10 @@ ${listOfDevices[i]}
 """
             atomicState.devicesStringWithValueH += """${listOfDevices[i]}: ${atomicState.arrayH."${listOfDevices[i]}"}
 """
-            if($atomicState.arrayH."${listOfDevices[i]}" == "unresponsive")
+            logging """Device = ${listOfDevices[i]}
+atomicState.arrayH.{listOfDevices[i]} = ${atomicState.arrayH."${listOfDevices[i]}"}
+"""
+            if(atomicState.arrayH."${listOfDevices[i]}" == "unresponsive")
             {
                 atomicState.message += "${listOfDevices[i]} is unresponsive... "
             }
@@ -548,7 +555,6 @@ def sendNotification(){ // sends notification without building new data
                     }
                     speech.speak(message)    
                 }
-
             }
         }
         else if(!sendAudioAlert)
