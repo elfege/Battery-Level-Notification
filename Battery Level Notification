@@ -30,7 +30,6 @@ preferences {
     page name:"pageSetup"
 
 }
-
 def pageSetup() {
 
     boolean haveDim = false
@@ -67,9 +66,9 @@ def pageSetup() {
             input "restrictedModes", "mode", title:"Pause this app if location is in one of these modes", required: false, multiple: true
         }
 
-        // Modify this section and/or add more
         section(){
             input "devices", "capability.battery", title: "Select your devices", multiple:true
+            input "batteryValue", "number", title: "Set a minimum battery value (or leave default value)", defaultValue:40
         }
         section("Notifications"){
             input "notification", "capability.notification", title: "Select notification devices", multiple:true, required:false, submitOnChange: true 
@@ -77,7 +76,7 @@ def pageSetup() {
             if(sendAudioAlert)
             {
                 input "speech", "capability.speechSynthesis", title: "Select your speech device", multiple:true, required:false, submitOnChange: true 
-                input "speaker", "capability.audioNotification", title: "Select your speakers", multiple:true, required:false, submitOnChange: true 
+                input "speaker", "capability.musicPlayer", title: "Select your speakers", multiple:true, required:false, submitOnChange: true 
                 if(speaker)
                 {
                     input "volumeLevel", "number", title: "Set the volume level", range: "0..100",required:true, submitOnChange: true  
@@ -96,7 +95,7 @@ def pageSetup() {
             title = atomicState.devicesStringWithValue != "" && atomicState.devicesStringWithValue != null ? "${atomicState.devicesStringWithValue}" : "Devices with low battery will show in this blue field"
             paragraph formatText(title, "white", "blue") 
 
-            input "deviceHealth", "bool", title:"Report devices that haven't responded in more than 72 hours", defaultValue:false, submitOnChange:true 
+            input "deviceHealth", "bool", title:"Report devices that haven't responded in more than 24 hours", defaultValue:false, submitOnChange:true 
             if(deviceHealth)
             {
                 title = "See the devices that are unresponsive here"
@@ -140,7 +139,7 @@ def pageSetup() {
                 input "checkAllValues", "button", title: "Get All Values For All Devices"
                 if(deviceHealth)
                 {
-                    input "checkAllLastEvent", "button", title: "Devices event time higher than 72 hours"
+                    input "checkAllLastEvent", "button", title: "Devices event time higher than 24 hours"
                     input "checkAllLastEventValues", "button", title: "Last event time for all devices"
                 }
                 input "sendNotifications", "button", title: "Send notifications"
@@ -171,27 +170,29 @@ def installed() {
 
 }
 def updated() {
-    descriptiontext "updated with settings: ${settings}"     
+    descriptionText "updated with settings: ${settings}"     
     unsubscribe()
     unschedule()
     initialize()
+    Poll()
 }
 def initialize() {
     atomicState.installed = true   
-    atomicState.message = ""
+    atomicState.messageList = []
+    atomicState.messageString = ""
 
     if(enablelogging == true){
         atomicState.EnableDebugTime = now()
         runIn(1800, disablelogging)
-        descriptiontext "disablelogging scheduled to run in ${1800/60} minutes"
+        descriptionText "disablelogging scheduled to run in ${1800/60} minutes"
     }
     else 
     {
         log.warn "debug logging disabled!"
     }
-    log.debug "Subscribing $devices to battery events"
+    logging "Subscribing $devices to battery events"
     subscribe(devices, "battery", mainHandler)
-    log.debug "Building the array"
+    logging "Building the array"
 
     initDb(true, true) // intialize DB's
 
@@ -205,11 +206,11 @@ def initialize() {
     {
         // updates data without sending notifications
         runEvery1Hour(checkAll, [data: false]) 
-        log.info "checkAll() scheduled to run every hour (getAllValues ? false)"
+        descriptionText "checkAll() scheduled to run every hour (getAllValues ? false)"
         if(deviceHealth)
         {
             runEvery1Hour(checkAllDevicesHealth, [data: false])
-            log.info "checkAllDevicesHealth() scheduled to run every hour (getAllValues ? false)"
+            descriptionText "checkAllDevicesHealth() scheduled to run every hour (getAllValues ? false)"
         }
     }
 
@@ -234,9 +235,9 @@ def appButtonHandler(btn) {
         logging "atomicState.paused = $atomicState.paused"
         if(atomicState.paused)
         {
-            log.debug "unsuscribing from events..."
+            logging "unsuscribing from events..."
             unsubscribe()  
-            log.debug "unschedule()..."
+            logging "unschedule()..."
             unschedule()
         }
         else
@@ -250,44 +251,62 @@ def appButtonHandler(btn) {
         updated()
         break
         case "checkAll":
+        atomicState.buttonRequest = true // allows to bypass all restrictions
         checkAll(false)
+        atomicState.buttonRequest = false
         break
         case "checkAllValues":
+        atomicState.buttonRequest = true // allows to bypass all restrictions
         checkAll(true)
+        atomicState.buttonRequest = false
         break
         case "checkAllLastEvent":
+        atomicState.buttonRequest = true // allows to bypass all restrictions
         checkAllDevicesHealth(false)
+        atomicState.buttonRequest = false
         break
         case "checkAllLastEventValues":
+        atomicState.buttonRequest = true // allows to bypass all restrictions
         checkAllDevicesHealth(true)
+        atomicState.buttonRequest = false
         break
         case "sendNotifications":
-        atomicState.lastNotification = 6*3600*1000
-        atomicState.message = ""
+        atomicState.buttonRequest = true // allows to bypass all restrictions
+        atomicState.lastNotification = 6*3600*1000 // allow to pass time test
+        atomicState.messageList = []
+        atomicState.messageSrting = ""
         checkAll(false)
         checkAllDevicesHealth(false)
         sendNotification()
+        atomicState.buttonRequest = false
         break
 
     }
 }
 def mainHandler(evt){
-    log.info "$evt.device battery is at ${evt.value}%"
-    if(atomicState.paused) return
+    descriptionText "$evt.device battery is at ${evt.value}%"
+    if(atomicState.paused && !atomicState.buttonRequest) return
+    if(location.mode in restrictedModes && !atomicState.buttonRequest){
+        descriptionText "location in restricted mode, doing nothing"
+        return
+    } 
 
-    checkAll(false) // check only values that are below < 30%
+    checkAll(false) // check only values that are below < batteryValue 
     if(deviceHealth)
     {
-        checkAllDevicesHealth(false) // check only devices that haven't return any event in more than 72 hours
+        checkAllDevicesHealth(false) // check only devices that haven't return any event in more than 24 hours
     }
     sendNotification()
 
-    if(location.mode in restrictedModes){
-        descriptiontext "location in restricted mode, doing nothing"
-        return
-    }    
+
 }
 def checkAll(getAllValues){  // called by java button event
+    //log.warn "atomicState.buttonRequest = $atomicState.buttonRequest"
+    if(atomicState.paused && !atomicState.buttonRequest) return
+    if(location.mode in restrictedModes && !atomicState.buttonRequest){
+        descriptionText "location in restricted mode, doing nothing"
+        return
+    } 
     initDb(true, false) // always reconstruct the entire db here
     int i = 0
     int s = devices.size()
@@ -303,7 +322,7 @@ def checkAll(getAllValues){  // called by java button event
             if(deviceValue != null)
             {
                 logging "checking battery value for $device. Value = $deviceValue deviceValue.toInteger() <= 100"
-                if(deviceValue.toInteger() <= 40 || getAllValues)
+                if(deviceValue.toInteger() < batteryValue || getAllValues)
                 {
                     logging "updating data for $device with value $deviceValue"
                     db."${device}" = deviceValue
@@ -321,11 +340,16 @@ def checkAll(getAllValues){  // called by java button event
     db = [:] // flush data
     logging "atomicState.array = $atomicState.array"
 
-    log.trace "database battery values done"
+    logging "database battery values done"
     buildDataString()
 
 }
 def checkAllDevicesHealth(getAllValues){  // called by java button event
+    if(atomicState.paused && !atomicState.buttonRequest) return
+    if(location.mode in restrictedModes && !atomicState.buttonRequest){
+        descriptionText "location in restricted mode, doing nothing"
+        return
+    } 
     initDb(false, true) // always reconstruct the entire db here
     int i = 0
     int s = devices.size()
@@ -333,15 +357,15 @@ def checkAllDevicesHealth(getAllValues){  // called by java button event
     def events = 0
     def dbH = [:]
 
-    def deltaHours = 72*3600*1000
+    def deltaHours = 24*3600*1000
 
     for(s!=0;i<s;i++)
     {
         device = devices[i]
         if(device != null)
         {
-            events = device.eventsSince(new Date(now() - deltaHours)).size() // collect all events within 72 hours
-            logging "$device has returned $events events in the last 72 hours"       
+            events = device.eventsSince(new Date(now() - deltaHours)).size() // collect all events within 24 hours
+            logging "$device has returned $events events in the last 24 hours"       
 
             if(events == 0 || getAllValues)
             {
@@ -360,11 +384,15 @@ def checkAllDevicesHealth(getAllValues){  // called by java button event
     atomicState.arrayH = dbH
     dbH = [:] // flush data
     logging "atomicState.arrayH = $atomicState.arrayH"
-    log.trace "database health values done"
+    logging "database health values done"
     buildDataStringDevicesHealth()
 }
 def initDb(a, b){
-
+    if(atomicState.paused && !atomicState.buttonRequest) return
+    if(location.mode in restrictedModes && !atomicState.buttonRequest){
+        descriptionText "location in restricted mode, doing nothing"
+        return
+    } 
     logging "a = $a b = $b"
     if(a)
     {
@@ -379,9 +407,16 @@ def initDb(a, b){
 
         atomicState.devicesStringWithValueH = "" // devices list with values for last event
     }
-    log.trace "database reset done"
+    logging "database reset done"
 }
 def buildDataString(){ // simply update database, without sending notifications
+
+    if(atomicState.paused && !atomicState.buttonRequest) return
+    if(location.mode in restrictedModes && !atomicState.buttonRequest){
+        descriptionText "location in restricted mode, doing nothing"
+        return
+    } 
+    logging "building message data"
     atomicState.duplicate = false
     int i = 0
     def listOfDevices = atomicState.array.keySet()
@@ -389,8 +424,6 @@ def buildDataString(){ // simply update database, without sending notifications
     atomicState.s = s
     logging "atomicState.array = $atomicState.array"
     logging "s = $s"
-
-    def message = ""
 
     for(s!=0;i<s;i++)
     {
@@ -408,12 +441,14 @@ ${listOfDevices[i]}
 
             if(atomicState.array."${listOfDevices[i]}" == "NO VALUE!")
             {
-               atomicState.message += "${listOfDevices[i]}'s is not working properly"
+                atomicState.messageList += "${listOfDevices[i]}'s is not working properly" // list so we can send one text notification per device
+                atomicState.messageString += "${listOfDevices[i]}'s is not working properly" // string for speakers
             }
-            else if(atomicState.array."${listOfDevices[i]}".toInteger() < 30)
+            else if(atomicState.array."${listOfDevices[i]}"?.toInteger() < batteryValue)
             {
                 logging "${listOfDevices[i]}"
-                atomicState.message += "${listOfDevices[i]}'s battery is low... "
+                atomicState.messageList += "${listOfDevices[i]}'s battery is low... "// list so we can send one text notification per device
+                atomicState.messageString += "${listOfDevices[i]}'s s battery is low..." // string for speakers
             }
         }
         else if(atomicState.devicesString == "")
@@ -428,10 +463,20 @@ ${listOfDevices[i]}
         {
             log.error "ERROR"
         }
+
+        // log.warn "atomicState.array = $atomicState.array"
     }
-    log.trace "database string battery values done"
+    logging """database string battery values done 
+atomicState.messageList = $atomicState.messageList
+atomicState.messageString = $atomicState.messageString
+"""
 }
 def buildDataStringDevicesHealth(){ // simply update database, without sending notifications
+    if(atomicState.paused && !atomicState.buttonRequest) return
+    if(location.mode in restrictedModes && !atomicState.buttonRequest){
+        descriptionText "location in restricted mode, doing nothing"
+        return
+    } 
     atomicState.duplicateH = false
     int i = 0
     def listOfDevices = atomicState.arrayH.keySet()
@@ -457,7 +502,8 @@ atomicState.arrayH.{listOfDevices[i]} = ${atomicState.arrayH."${listOfDevices[i]
 """
             if(atomicState.arrayH."${listOfDevices[i]}" == "unresponsive")
             {
-                atomicState.message += "${listOfDevices[i]} is unresponsive... "
+                atomicState.messageList += "${listOfDevices[i]} is unresponsive... " // list for text notifications 1 text per device
+                atomicState.messageString += "${listOfDevices[i]} is unresponsive... " // text for speakers
             }
         }
         else if(atomicState.devicesStringH == "")
@@ -473,13 +519,18 @@ atomicState.arrayH.{listOfDevices[i]} = ${atomicState.arrayH."${listOfDevices[i]
             log.error "ERROR"
         }
     }
-    log.trace "database string health values done"
+    logging "database string health values done"
 } 
 def sendNotification(){ // sends notification without building new data
+    if(atomicState.paused && !atomicState.buttonRequest) return
+    if(location.mode in restrictedModes && !atomicState.buttonRequest){
+        descriptionText "location in restricted mode, doing nothing"
+        return
+    } 
+    def messageList = atomicState.messageList != null ? atomicState.messageList : []
+    def messageString = atomicState.messageString != null ? atomicState.messageString : ""
 
-    def message = atomicState.message != null ? atomicState.message : ""
-
-    if(message == "") { 
+    if(messageList.size() == 0 && messageString.size() == 0) { 
         log.warn "string is empty" 
         return 
     }
@@ -492,23 +543,31 @@ def sendNotification(){ // sends notification without building new data
     {
         atomicState.lastNotification = now()
 
+
         def speakers = speaker ? buildDebugString(speaker) : ""
         def speeches = speech ? buildDebugString(speech) : ""
         def notifDevices = notification ? buildDebugString(notification) : ""
 
         def notifLogs = "${notification && speaker && speech ? "to ${notifDevices}, ${speakers}, ${speeches}" : notification && speaker ? "to ${notifDevices}, ${speakers}" : notification && speech ? "to ${notifDevices}, ${speechesspeeches}" : speaker && speech ? "to ${speakers}, ${speeches}" : speaker ? "to ${speakers}" : speech ? "to ${speeches}" : ""}" 
 
-        def debugMessage = "message to be sent: '${message} ${notifLogs}" 
+        def debugMessage = "message to be sent: '${messageString} ${notifLogs}" 
 
-        descriptiontext formatText(debugMessage, "white", "red")
+        descriptionText formatText(debugMessage, "white", "red")
 
-        if(notification)
+        if(notification) // text notification
         {
-            notification.deviceNotification(message)
+            int i = 0
+            int s = messageList.size()
+            for(i!=0;i<s;i++)
+            {
+                log.debug "message = ${messageList[i]}"
+                notification.deviceNotification(messageList[i])
+            }
+
         }
         else
         {
-            log.info "User did not select any text notification device"
+            descriptionText "User did not select any text notification device"
         }
         if(sendAudioAlert){
             if(speaker || speech)
@@ -525,16 +584,18 @@ def sendNotification(){ // sends notification without building new data
                             device = speaker[i]
                             if(device.hasCommand("initialize"))
                             {
-                                log.debug "Initializing $device (speaker)"
+                                logging "Initializing $device (speaker)"
                                 device.initialize()
-                                log.debug "wainting for 1 second"
+                                logging "wainting for 1 second"
                                 pauseExecution(1000)
                             }
                         }
                     }
-                    speaker.playTextAndRestore(message, volumeLevel.toInteger())
+                    speaker.setLevel(volumeLevel)
+                    pauseExecution(500)
+                    speaker.playTextAndRestore(messageString)
                 }
-                if(speech)
+                else if(speech)
                 {
                     if(initializeDevices)
                     {
@@ -546,30 +607,37 @@ def sendNotification(){ // sends notification without building new data
                             device = speech[i]
                             if(device.hasCommand("initialize"))
                             {
-                                log.debug "Initializing $device (speech)"
+                                logging "Initializing $device (speech)"
                                 device.initialize()
-                                log.debug "wainting for 1 second"
+                                logging "wainting for 1 second"
                                 pauseExecution(1000)
                             }
                         }
                     }
-                    speech.speak(message)    
+                    log.debug "sending $messageString to $speech"
+                    speech.speak(messageString)    
                 }
             }
         }
         else if(!sendAudioAlert)
         {
-            log.info "Sound notifications disabled at user's request"   
+            descriptionText "Sound notifications disabled at user's request"   
         }
     }
     else 
     {
-        descriptiontext "last notification sent less than ${dTime/3600/1000} ${scheduleReminders?.toInteger() > 1 ? "hours":"hour"} ago"
+        descriptionText "last notification sent less than ${dTime/3600/1000} ${scheduleReminders?.toInteger() > 1 ? "hours":"hour"} ago"
     }
 
-    atomicState.message = ""
+    atomicState.messageList = []
+    atomicState.messageString = ""
 }
 def buildDebugString(deviceList){
+    if(atomicState.paused && !atomicState.buttonRequest) return
+    if(location.mode in restrictedModes && !atomicState.buttonRequest){
+        descriptionText "location in restricted mode, doing nothing"
+        return
+    } 
     def devices = ""
     int i = 0 
     int s = deviceList.size()
@@ -581,41 +649,38 @@ def buildDebugString(deviceList){
         }
 
     }
+
     return devices
 }
 def Poll(){
-
-    boolean devicesPoll = devices.findAll{it.hasCommand("poll")}.size() == windows.size()
-    boolean devicesRefresh = devices.findAll{it.hasCommand("refresh")}.size() == windows.size()
-
-    if(devicesRefresh){
-        int i = 0
-        int s = devices.size()
-        for(s!=0;i<s;i++)
+    if(atomicState.paused && !atomicState.buttonRequest) return
+    if(location.mode in restrictedModes && !atomicState.buttonRequest){
+        descriptionText "location in restricted mode, doing nothing"
+        return
+    } 
+    int i = 0
+    int s = devices.size()
+    for(s!=0;i<s;i++)
+    {
+        def dev = devices[i]
+        if(dev.hasCommand("Poll") || dev.hasCommand("poll"))
         {
-            def dev = devices[i]
-            dev.refresh()
-            descriptiontext("refreshing $dev")
+            dev.poll()
+            descriptionText("polling $dev")
         }
-    }
-    if(devicesPoll){
-        int i = 0
-        int s = devices.size()
-        for(s!=0;i<s;i++)
+        if(dev.hasCommand("Refresh") || dev.hasCommand("refresh"))
         {
-            def dev = devices[i]
             dev.refresh()
-            descriptiontext("refreshing $dev")
+            descriptionText("refreshing $dev")
         }
     }
 }
-
 def logging(msg){
     //log.warn "enablelogging ? $enablelogging" 
     if (enablelogging) log.debug msg
     if(debug && atomicState.EnableDebugTime == null) atomicState.EnableDebugTime = now()
 }
-def descriptiontext(msg){
+def descriptionText(msg){
     //log.warn "enabledescriptiontext = ${enabledescriptiontext}" 
     if (enabledescriptiontext) log.info msg
 }
